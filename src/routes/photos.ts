@@ -5,7 +5,6 @@ import { upload } from '../middleware/upload';
 import { detectFaces, findBestMatch } from '../utils/faceRecognition';
 import sharp from 'sharp';
 import path from 'path';
-import fs from 'fs';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -18,10 +17,10 @@ router.post('/selfie', authenticate, upload.single('selfie'), async (req: any, r
 
     const imageUrl = `/uploads/selfies/${req.file.filename}`;
 
-    // Detect face and get descriptor
-    let descriptor = null;
+    let descriptor: number[] | undefined = undefined;
     const filePath = path.join(__dirname, '../../uploads', 'selfies', req.file.filename);
     const faces = await detectFaces(filePath);
+
     if (faces.length > 0) {
       descriptor = faces[0].descriptor;
     }
@@ -35,17 +34,16 @@ router.post('/selfie', authenticate, upload.single('selfie'), async (req: any, r
       },
       update: {
         imageUrl,
-        descriptor: descriptor ? JSON.stringify(descriptor) : null
+        descriptor: descriptor ?? undefined
       },
       create: {
         userId: req.user.id,
         eventId,
         imageUrl,
-        descriptor: descriptor ? JSON.stringify(descriptor) : null
+        descriptor: descriptor ?? undefined
       }
     });
 
-    // Update registration
     await prisma.registration.update({
       where: {
         userId_eventId: {
@@ -62,7 +60,7 @@ router.post('/selfie', authenticate, upload.single('selfie'), async (req: any, r
   }
 });
 
-// Upload event photos (photographer)
+// Upload event photos
 router.post('/upload', authenticate, authorize('photographer', 'admin'), upload.array('photos', 50), async (req: any, res) => {
   try {
     const { eventId } = req.body;
@@ -74,7 +72,6 @@ router.post('/upload', authenticate, authorize('photographer', 'admin'), upload.
     const uploadedPhotos = [];
 
     for (const file of files) {
-      // Create thumbnail
       const thumbnailFilename = `thumb_${file.filename}`;
       const photoPath = path.join(__dirname, '../../uploads/photos', file.filename);
       const thumbPath = path.join(__dirname, '../../uploads/thumbnails', thumbnailFilename);
@@ -84,9 +81,8 @@ router.post('/upload', authenticate, authorize('photographer', 'admin'), upload.
         .jpeg({ quality: 80 })
         .toFile(thumbPath);
 
-      // Detect faces
       const faces = await detectFaces(photoPath);
-      const descriptorData = faces.map(f => f.descriptor);
+      const descriptorData: number[][] = faces.map(f => f.descriptor);
 
       const photo = await prisma.eventPhoto.create({
         data: {
@@ -94,14 +90,13 @@ router.post('/upload', authenticate, authorize('photographer', 'admin'), upload.
           uploaderId: req.user.id,
           imageUrl: `/uploads/photos/${file.filename}`,
           thumbnailUrl: `/uploads/thumbnails/${thumbnailFilename}`,
-          descriptorData: descriptorData.length > 0 ? JSON.stringify(descriptorData) : null,
+          descriptorData: descriptorData.length > 0 ? descriptorData : undefined,
           status: descriptorData.length > 0 ? 'processing' : 'unmatched'
         }
       });
 
       uploadedPhotos.push(photo);
 
-      // Auto-match faces
       if (descriptorData.length > 0) {
         await matchPhotoToUsers(photo.id, eventId, descriptorData);
       }
@@ -116,10 +111,9 @@ router.post('/upload', authenticate, authorize('photographer', 'admin'), upload.
   }
 });
 
-// Run face matching on a photo
+// Match logic
 async function matchPhotoToUsers(photoId: string, eventId: string, photoDescriptors: number[][]) {
   try {
-    // Get all selfies for this event
     const selfies = await prisma.selfie.findMany({
       where: { eventId },
       include: { user: true }
@@ -128,11 +122,10 @@ async function matchPhotoToUsers(photoId: string, eventId: string, photoDescript
     for (const selfie of selfies) {
       if (!selfie.descriptor) continue;
 
-      const selfieDescriptor = JSON.parse(selfie.descriptor as string);
+      const selfieDescriptor = selfie.descriptor as number[];
       const { matched, confidence } = findBestMatch(photoDescriptors, selfieDescriptor);
 
       if (matched) {
-        // Create face match
         await prisma.faceMatch.create({
           data: {
             photoId,
@@ -142,7 +135,6 @@ async function matchPhotoToUsers(photoId: string, eventId: string, photoDescript
           }
         });
 
-        // Create notification
         await prisma.notification.create({
           data: {
             userId: selfie.userId,
@@ -155,123 +147,16 @@ async function matchPhotoToUsers(photoId: string, eventId: string, photoDescript
       }
     }
 
-    // Update photo status
     const matchCount = await prisma.faceMatch.count({ where: { photoId } });
+
     await prisma.eventPhoto.update({
       where: { id: photoId },
       data: { status: matchCount > 0 ? 'matched' : 'unmatched' }
     });
+
   } catch (error) {
     console.error('Face matching error:', error);
   }
 }
-
-// Get my photos (attendee gallery)
-router.get('/my-gallery', authenticate, async (req: any, res) => {
-  try {
-    // Get all face matches for this user
-    const matches = await prisma.faceMatch.findMany({
-      where: {
-        userId: req.user.id,
-        matchStatus: 'confirmed'
-      },
-      include: {
-        photo: {
-          include: {
-            event: {
-              select: { id: true, title: true, date: true }
-            }
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const photos = matches.map((m : any)=> m.photo);
-    res.json(photos);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get event photos (for organizer/photographer)
-router.get('/event/:eventId', authenticate, async (req: any, res) => {
-  try {
-    const { status } = req.query;
-    const where: any = { eventId: req.params.eventId };
-    if (status) where.status = status;
-
-    const photos = await prisma.eventPhoto.findMany({
-      where,
-      include: {
-        uploader: {
-          select: { id: true, name: true }
-        },
-        faceMatches: {
-          include: {
-            user: {
-              select: { id: true, name: true, avatarUrl: true }
-            }
-          }
-        }
-      },
-      orderBy: { uploadedAt: 'desc' }
-    });
-
-    res.json(photos);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get unmatched photos (admin review)
-router.get('/unmatched', authenticate, authorize('admin'), async (_req, res) => {
-  try {
-    const photos = await prisma.eventPhoto.findMany({
-      where: { status: 'unmatched' },
-      include: {
-        event: { select: { id: true, title: true } }
-      }
-    });
-    res.json(photos);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Manual tag photo (admin)
-router.post('/:id/tag', authenticate, authorize('admin'), async (req: any, res) => {
-  try {
-    const { userId, confidence } = req.body;
-
-    const match = await prisma.faceMatch.create({
-      data: {
-        photoId: req.params.id,
-        userId,
-        confidenceScore: confidence || 1.0,
-        matchStatus: 'confirmed'
-      }
-    });
-
-    await prisma.eventPhoto.update({
-      where: { id: req.params.id },
-      data: { status: 'matched' }
-    });
-
-    res.json(match);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete photo
-router.delete('/:id', authenticate, authorize('photographer', 'admin'), async (req, res) => {
-  try {
-    await prisma.eventPhoto.delete({ where: { id: req.params.id } });
-    res.json({ message: 'Photo deleted' });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 export default router;
