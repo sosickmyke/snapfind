@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  phone         String?
+  passwordHash  String    @map("password_hash")
+  role          UserRole  @default(attendee)
+  status        UserStatus @default(active)
+  avatarUrl     String?   @map("avatar_url")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLogin     DateTime? @map("last_login")
+
+  // Relations
+  organizedEvents   Event[]         @relation("OrganizerEvents")
+  registrations     Registration[]
+  payments          Payment[]
+  selfies           Selfie[]
+  photographerEvents Event[]        @relation("PhotographerEvents")
+  faceMatches       FaceMatch[]
+  notifications     Notification[]
+  uploadedPhotos    EventPhoto[]   @relation("PhotoUploader")
+
+  @@map("users")
+}
+
+model Event {
+  id              String      @id @default(cuid())
+  organizerId     String      @map("organizer_id")
+  photographerId  String?     @map("photographer_id")
+  title           String
+  description     String
+  venue           String
+  date            DateTime
+  endDate         DateTime?   @map("end_date")
+  bannerUrl       String?     @map("banner_url")
+  price           Int         // in kobo (NGN * 100)
+  eventCode       String      @unique @map("event_code")
+  status          EventStatus @default(draft)
+  maxAttendees    Int?        @map("max_attendees")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  organizer       User         @relation("OrganizerEvents", fields: [organizerId], references: [id])
+  photographer    User?        @relation("PhotographerEvents", fields: [photographerId], references: [id])
+  registrations   Registration[]
+  payments        Payment[]
+  selfies         Selfie[]
+  photos          EventPhoto[]
+  notifications   Notification[]
+
+  @@map("events")
+}
+
+model Registration {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  eventId       String    @map("event_id")
+  paymentStatus String    @default(pending) @map("payment_status")
+  selfieStatus  String    @default(pending) @map("selfie_status")
+  registeredAt  DateTime  @default(now()) @map("registered_at")
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id])
+  event         Event     @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+  @@map("registrations")
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  userId      String        @map("user_id")
+  eventId     String        @map("event_id")
+  amount      Int           // in kobo
+  currency    String        @default("NGN")
+  reference   String        @unique
+  gateway     PaymentGateway
+  status      PaymentStatus @default(pending)
+  paidAt      DateTime?     @map("paid_at")
+  metadata    Json?         // gateway response
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  user        User          @relation(fields: [userId], references: [id])
+  event       Event         @relation(fields: [eventId], references: [id])
+
+  @@map("payments")
+}
+
+model Selfie {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  eventId       String    @map("event_id")
+  imageUrl      String    @map("image_url")
+  descriptor    Json?     // face-api.js face descriptor
+  uploadedAt    DateTime  @default(now()) @map("uploaded_at")
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id])
+  event         Event     @relation(fields: [eventId], references: [id])
+
+  @@unique([userId, eventId])
+  @@map("selfies")
+}
+
+model EventPhoto {
+  id              String      @id @default(cuid())
+  eventId         String      @map("event_id")
+  uploaderId      String      @map("uploader_id")
+  imageUrl        String      @map("image_url")
+  thumbnailUrl    String?     @map("thumbnail_url")
+  status          PhotoStatus @default(uploaded)
+  descriptorData  Json?       @map("descriptor_data") // array of face descriptors found
+  uploadedAt      DateTime    @default(now()) @map("uploaded_at")
+
+  // Relations
+  event           Event       @relation(fields: [eventId], references: [id])
+  uploader        User        @relation("PhotoUploader", fields: [uploaderId], references: [id])
+  faceMatches     FaceMatch[]
+
+  @@map("event_photos")
+}
+
+model FaceMatch {
+  id              String      @id @default(cuid())
+  photoId         String      @map("photo_id")
+  userId          String      @map("user_id")
+  confidenceScore Float       @map("confidence_score")
+  matchStatus     MatchStatus @default(confirmed) @map("match_status")
+  createdAt       DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  photo           EventPhoto  @relation(fields: [photoId], references: [id])
+  user            User        @relation(fields: [userId], references: [id])
+
+  @@unique([photoId, userId])
+  @@map("face_matches")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  eventId   String?          @map("event_id")
+  title     String
+  message   String
+  type      NotificationType @default(info)
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user      User             @relation(fields: [userId], references: [id])
+  event     Event?           @relation(fields: [eventId], references: [id])
+
+  @@map("notifications")
+}
+
+// Enums
+enum UserRole {
+  attendee
+  organizer
+  photographer
+  admin
+}
+
+enum UserStatus {
+  active
+  pending
+  suspended
+}
+
+enum EventStatus {
+  draft
+  published
+  ongoing
+  completed
+  cancelled
+}
+
+enum PaymentGateway {
+  paystack
+  flutterwave
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+  refunded
+}
+
+enum PhotoStatus {
+  uploaded
+  processing
+  matched
+  unmatched
+  delivered
+}
+
+enum MatchStatus {
+  confirmed
+  rejected
+}
+
+enum NotificationType {
+  info
+  success
+  warning
+  error
+}
