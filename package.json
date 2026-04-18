@@ -9,7 +9,11 @@
     "dev": "tsx watch src/server.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
+    "db:seed": "prisma db seed",
     "postinstall": "prisma generate"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.7.0",
@@ -34,6 +38,7 @@
     "@types/node": "^20.19.39",
     "@types/uuid": "^9.0.8",
     "prisma": "^5.7.0",
+    "ts-node": "^10.9.2",
     "tsx": "^4.6.2",
     "typescript": "^5.3.3"
   },
