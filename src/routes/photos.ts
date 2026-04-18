@@ -187,7 +187,7 @@ router.get('/my-gallery', authenticate, async (req: any, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    const photos = matches.map(m => m.photo);
+    const photos = matches.map((m : any)=> m.photo);
     res.json(photos);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
