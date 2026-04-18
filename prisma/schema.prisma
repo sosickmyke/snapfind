@@ -66,8 +66,8 @@ model Registration {
   id            String    @id @default(cuid())
   userId        String    @map("user_id")
   eventId       String    @map("event_id")
-  paymentStatus String    @default(pending) @map("payment_status")
-  selfieStatus  String    @default(pending) @map("selfie_status")
+  paymentStatus String    @default("pending") @map("payment_status")
+  selfieStatus  String    @default("pending") @map("selfie_status")
   registeredAt  DateTime  @default(now()) @map("registered_at")
 
   // Relations
