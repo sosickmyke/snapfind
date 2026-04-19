@@ -159,4 +159,8 @@ async function matchPhotoToUsers(photoId: string, eventId: string, photoDescript
   }
 }
 
+router.get("/my-gallery", async (req, res) => {
+  res.json({ message: "my gallery works" });
+});
+
 export default router;
