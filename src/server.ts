@@ -36,6 +36,13 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get("/", (_req, res) => {
+  res.json({
+    status: "SnapFind API running",
+    env: process.env.NODE_ENV,
+  });
+});
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
